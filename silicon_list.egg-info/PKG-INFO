@@ -1,0 +1,55 @@
+Metadata-Version: 2.4
+Name: silicon-list
+Version: 0.1.0
+Summary: A pipeline for finding, deduplicating, ranking, and reporting on hardware/low-level engineering internships.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: requests
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+
+# Silicon List
+
+Silicon List is a local-first Python CLI tool that finds hardware and low-level engineering internship listings, deduplicates them across runs, ranks them into tiers, and outputs a structured Markdown report.
+
+## Setup
+
+Requires Python 3.10+
+
+```bash
+# Create a virtual environment
+python -m venv venv
+source venv/bin/activate
+
+# Install the project
+pip install -e .
+```
+
+## Usage
+
+Run the CLI:
+```bash
+silicon-list --mode live --provider all
+```
+
+**Options:**
+- `--mode mock|live`: Whether to use live data (GitHub fetching) or mock data.
+- `--provider mock|github|all`: Which provider to use.
+- `--output-dir PATH`: Override the default directory for files (`~/.silicon-list`).
+- `--write-default-config`: Writes the default configuration file and exits.
+- `--print-report`: Print the markdown report directly to stdout.
+- `--dry-run`: Do not update `seen.json`, so you can re-run and see the same listings.
+- `--reset-seen`: Wipes out `seen.json` before running.
+- `--json-export`: Dumps the results to a `results.json` file.
+
+## Outputs
+
+All outputs by default go to `~/.silicon-list/`:
+- `results.md`: The tiered job listings.
+- `seen.json`: State file to prevent duplicate reporting.
+- `errors.log`: Error logs (if any).
+- `config.json`: Can be generated and edited to tweak search queries and priorities.
+
+## Pluggable Architecture
+
+The system uses `silicon_list.providers.base.BaseProvider`. If you want to integrate a live job board wrapper (like JobSpy), you can simply implement the `fetch_listings()` method and register it in `main.py`.

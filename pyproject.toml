@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silicon-list"
+version = "0.1.0"
+description = "A pipeline for finding, deduplicating, ranking, and reporting on hardware/low-level engineering internships."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+silicon-list = "silicon_list.main:main"
