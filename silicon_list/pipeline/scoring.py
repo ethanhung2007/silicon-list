@@ -8,7 +8,7 @@ def score_listings(listings: List[Listing], config: Config) -> List[ScoredListin
     
     priority_companies = [c.lower() for c in config.priority_companies]
     known_tools = [t.lower() for t in config.known_tools]
-    target_cycles = ["summer 2026", "fall 2026", "spring 2027", "summer 2027"]
+    target_cycles = [cycle.lower() for cycle in config.target_cycle_keywords]
     
     for lst in listings:
         score = 0

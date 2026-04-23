@@ -1,7 +1,8 @@
+import datetime
 import pytest
 from silicon_list.models import Listing
 from silicon_list.config import Config
-from silicon_list.pipeline.filtering import filter_listings
+from silicon_list.pipeline.filtering import filter_listings, posted_age_days
 
 @pytest.fixture
 def config():
@@ -69,6 +70,49 @@ def test_filter_irrelevant(config):
     assert len(kept) == 1
     assert kept[0].company == "B"
     assert skipped[0][1] == "irrelevant"
+
+def test_filter_bad_apply_urls(config):
+    listings = [
+        Listing(source="test", source_job_id="1", company="Intel", role="Silicon Hardware Engineering Intern", location="US", apply_url="https://intel.wd1.myworkdayjobs.com/en-US/External/job/Silicon-Hardware-Engineering----Intern--Bachelor-s_JR0281132/apply/useMyLastApplication", description="Silicon hardware internship.", cycle=""),
+        Listing(source="test", source_job_id="2", company="Plexus", role="Intern - Analog Engineer", location="US", apply_url="https://www.linkedin.com/jobs/view/intern-analog-engineer-spring-2027-at-plexus-corp-4364394592", description="Analog hardware internship.", cycle=""),
+        Listing(source="test", source_job_id="3", company="B", role="FPGA Intern", location="US", apply_url="https://jobs.lever.co/example/123", description="Verilog internship.", cycle=""),
+    ]
+
+    kept, skipped = filter_listings(listings, config)
+
+    assert len(kept) == 1
+    assert kept[0].company == "B"
+    assert [reason for _, reason in skipped] == ["bad_apply_url", "bad_apply_url"]
+
+def test_filter_old_posted_dates(config):
+    config.max_listing_age_days = 31
+    listings = [
+        Listing(source="test", source_job_id="1", company="A", role="FPGA Intern", location="US", apply_url="https://jobs.lever.co/a/1", description="Verilog internship.", posted_at="45d", cycle=""),
+        Listing(source="test", source_job_id="2", company="B", role="FPGA Intern", location="US", apply_url="https://jobs.lever.co/b/2", description="Verilog internship.", posted_at="7d", cycle=""),
+    ]
+
+    kept, skipped = filter_listings(listings, config)
+
+    assert len(kept) == 1
+    assert kept[0].company == "B"
+    assert skipped[0][1] == "too_old"
+
+def test_filter_wrong_explicit_cycle(config):
+    listings = [
+        Listing(source="test", source_job_id="1", company="A", role="FPGA Intern Summer 2025", location="US", apply_url="https://jobs.lever.co/a/1", description="Verilog internship.", cycle=""),
+        Listing(source="test", source_job_id="2", company="B", role="FPGA Intern Summer 2026", location="US", apply_url="https://jobs.lever.co/b/2", description="Verilog internship.", cycle=""),
+    ]
+
+    kept, skipped = filter_listings(listings, config)
+
+    assert len(kept) == 1
+    assert kept[0].company == "B"
+    assert skipped[0][1] == "wrong_cycle"
+
+def test_posted_age_days_parses_common_formats():
+    assert posted_age_days("today") == 0
+    assert posted_age_days("2w") == 14
+    assert posted_age_days("2026-04-01", today=datetime.date(2026, 4, 22)) == 21
 
 def test_filter_openclaw_generic_collection_pages(config):
     listings = [

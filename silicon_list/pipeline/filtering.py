@@ -1,3 +1,4 @@
+import datetime
 import re
 from typing import List, Tuple
 from silicon_list.models import Listing
@@ -26,6 +27,17 @@ GENERIC_OPENCLAW_URL_PATTERNS = [
 
 GENERIC_OPENCLAW_DOMAINS = [
     "applybolt.app",
+]
+
+BAD_APPLY_URL_PATTERNS = [
+    re.compile(r"/apply/(?:autofillWithResume|useMyLastApplication)/?$", re.IGNORECASE),
+    re.compile(r"linkedin\.com/jobs/view/", re.IGNORECASE),
+    re.compile(r"linkedin\.com/jobs/search", re.IGNORECASE),
+    re.compile(r"ev\.careers/jobs/", re.IGNORECASE),
+    re.compile(r"gradconnection\.com/", re.IGNORECASE),
+    re.compile(r"careers\.smartrecruiters\.com/[^/?#]+/?(?:$|[?#])", re.IGNORECASE),
+    re.compile(r"/about/job-post(?:$|[?#])", re.IGNORECASE),
+    re.compile(r"/career-details/?(?:$|[?#])", re.IGNORECASE),
 ]
 
 GENERIC_OPENCLAW_ROLE_PHRASES = [
@@ -68,6 +80,69 @@ def is_generic_openclaw_listing(listing: Listing) -> bool:
     has_specific_url = any(token in url_lower for token in ["/job/", "/jobs/", "jobid=", "gh_jid=", "lever.co", "greenhouse.io", "ashbyhq.com", "workdayjobs.com"])
     return generic_role and not has_specific_url
 
+def has_bad_apply_url(listing: Listing) -> bool:
+    url_lower = listing.apply_url.lower()
+    return any(pattern.search(url_lower) for pattern in BAD_APPLY_URL_PATTERNS)
+
+def posted_age_days(posted_at: str | None, today: datetime.date | None = None) -> int | None:
+    if not posted_at:
+        return None
+
+    today = today or datetime.date.today()
+    text = posted_at.strip().lower()
+    if not text:
+        return None
+    if text in {"today", "just posted", "new"}:
+        return 0
+    if text == "yesterday":
+        return 1
+
+    match = re.fullmatch(r"(\d+)\s*d(?:ays?)?", text)
+    if match:
+        return int(match.group(1))
+    match = re.fullmatch(r"(\d+)\s*w(?:eeks?)?", text)
+    if match:
+        return int(match.group(1)) * 7
+    match = re.fullmatch(r"(\d+)\s*mo(?:nths?)?", text)
+    if match:
+        return int(match.group(1)) * 30
+
+    for fmt in ("%Y-%m-%d", "%b %d, %Y", "%B %d, %Y"):
+        try:
+            posted_date = datetime.datetime.strptime(posted_at.strip(), fmt).date()
+            return max((today - posted_date).days, 0)
+        except ValueError:
+            pass
+
+    for fmt in ("%b %d", "%B %d"):
+        try:
+            parsed = datetime.datetime.strptime(posted_at.strip(), fmt)
+            posted_date = datetime.date(today.year, parsed.month, parsed.day)
+            if posted_date > today:
+                posted_date = datetime.date(today.year - 1, parsed.month, parsed.day)
+            return max((today - posted_date).days, 0)
+        except ValueError:
+            pass
+
+    return None
+
+def is_too_old(listing: Listing, config: Config) -> bool:
+    max_age = getattr(config, "max_listing_age_days", 0)
+    if not max_age:
+        return False
+
+    age = posted_age_days(listing.posted_at)
+    if age is None:
+        return not getattr(config, "keep_unknown_posted_at", True)
+    return age > max_age
+
+def has_wrong_explicit_cycle(listing: Listing, config: Config) -> bool:
+    text = f"{listing.role} {listing.description} {listing.cycle}".lower()
+    if not re.search(r"\b20\d{2}\b", text):
+        return False
+    target_cycles = [cycle.lower() for cycle in getattr(config, "target_cycle_keywords", [])]
+    return not any(cycle in text for cycle in target_cycles)
+
 def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listing], List[Tuple[Listing, str]]]:
     """
     Filters listings.
@@ -88,6 +163,18 @@ def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listi
         # 1. Hard exclusions
         if has_hard_exclusion(text_to_search, config):
             skipped.append((lst, "hard_exclusion"))
+            continue
+
+        if has_bad_apply_url(lst):
+            skipped.append((lst, "bad_apply_url"))
+            continue
+
+        if is_too_old(lst, config):
+            skipped.append((lst, "too_old"))
+            continue
+
+        if has_wrong_explicit_cycle(lst, config):
+            skipped.append((lst, "wrong_cycle"))
             continue
 
         if is_generic_openclaw_listing(lst):

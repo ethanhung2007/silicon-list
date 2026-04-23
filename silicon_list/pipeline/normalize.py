@@ -1,6 +1,19 @@
 import re
 from typing import List
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from silicon_list.models import Listing
+
+TRACKING_PARAM_PREFIXES = ("utm_",)
+TRACKING_PARAM_NAMES = {
+    "ref",
+    "src",
+    "source",
+    "gh_src",
+    "gh_jid",
+    "lever-source",
+    "isd_source",
+    "tracking",
+}
 
 def normalize_listings(listings: List[Listing]) -> List[Listing]:
     """Normalizes string fields in listings for consistency."""
@@ -11,16 +24,7 @@ def normalize_listings(listings: List[Listing]) -> List[Listing]:
         role = re.sub(r'\s+', ' ', lst.role).strip()
         location = re.sub(r'\s+', ' ', lst.location).strip()
         
-        # Lowercase for consistency in processing, but maybe keep original for display?
-        # Actually it's better to keep original for display but normalize for dedupe
-        # Let's clean up apply url as well
-        apply_url = lst.apply_url.strip()
-        if '?' in apply_url and ('linkedin.com' in apply_url or 'greenhouse.io' in apply_url):
-            # Try to strip tracking params if possible, but safely
-            base, params = apply_url.split('?', 1)
-            # Just keep base if it's a known cleanable board, else keep full to not break
-            if 'greenhouse.io' in base:
-                apply_url = base
+        apply_url = normalize_apply_url(lst.apply_url)
         
         normalized.append(Listing(
             source=lst.source,
@@ -37,3 +41,24 @@ def normalize_listings(listings: List[Listing]) -> List[Listing]:
         ))
         
     return normalized
+
+def normalize_apply_url(url: str) -> str:
+    """Removes tracking params and rewrites known apply-action URLs to stable job pages."""
+    url = url.strip()
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+
+    path = parsed.path
+    path = re.sub(r"/apply/(?:autofillWithResume|applyManually|useMyLastApplication)/?$", "", path)
+    path = re.sub(r"/apply/?$", "", path)
+    path = re.sub(r"/application/?$", "", path)
+
+    params = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith(TRACKING_PARAM_PREFIXES)
+        and key.lower() not in TRACKING_PARAM_NAMES
+    ]
+
+    return urlunparse(parsed._replace(path=path, query=urlencode(params), fragment=""))

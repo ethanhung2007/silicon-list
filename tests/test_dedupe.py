@@ -29,3 +29,15 @@ def test_dedupe(tmp_path: Path):
     assert len(seen) == 1
     assert new[0] == listing3
     assert seen[0] == listing1
+
+def test_dedupe_duplicate_urls_in_same_run(tmp_path: Path):
+    manager = StateManager(tmp_path / "seen.json")
+    listings = [
+        Listing(source="searxng", source_job_id="1", company="Intel", role="Silicon Hardware Engineering Intern", location="", apply_url="https://intel.example/job/123", description="Verilog internship"),
+        Listing(source="searxng", source_job_id="2", company="Intel", role="Silicon Hardware Engineering - Intern", location="", apply_url="https://intel.example/job/123", description="Verilog internship"),
+    ]
+
+    new, seen = dedupe_listings(listings, manager)
+
+    assert len(new) == 1
+    assert len(seen) == 1

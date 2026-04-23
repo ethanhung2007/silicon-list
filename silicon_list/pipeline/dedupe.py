@@ -39,8 +39,16 @@ def dedupe_listings(listings: List[Listing], state_manager: StateManager) -> Tup
     """
     new_listings = []
     seen = []
+    run_urls = set()
     
     for lst in listings:
+        normalized_url = lst.apply_url.strip().lower()
+        if normalized_url and normalized_url in run_urls:
+            seen.append(lst)
+            continue
+        if normalized_url:
+            run_urls.add(normalized_url)
+
         keys = generate_dedupe_keys(lst)
         is_seen = False
         

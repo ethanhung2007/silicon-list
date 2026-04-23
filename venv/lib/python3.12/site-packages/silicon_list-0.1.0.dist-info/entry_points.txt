@@ -1,0 +1,2 @@
+[console_scripts]
+silicon-list = silicon_list.main:main

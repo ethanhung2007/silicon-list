@@ -12,6 +12,7 @@ from silicon_list.providers.base import ProviderError, RateLimitError
 from silicon_list.providers.mock_provider import MockProvider
 from silicon_list.providers.github_simplify import GitHubSimplifyProvider
 from silicon_list.providers.google_search import GoogleSearchProvider
+from silicon_list.providers.searxng_search import SearXNGSearchProvider
 from silicon_list.providers.openclaw_file import OpenClawFileProvider
 
 from silicon_list.pipeline.normalize import normalize_listings
@@ -27,7 +28,7 @@ def main():
     parser.add_argument("--write-default-config", action="store_true", help="Write default config and exit")
     parser.add_argument("--print-report", action="store_true", help="Print the report to stdout instead of file")
     parser.add_argument("--include-github-only", action="store_true", help="Only run Github Simplify provider")
-    parser.add_argument("--provider", choices=["mock", "github", "google", "openclaw", "all"], default="mock", help="Provider to use")
+    parser.add_argument("--provider", choices=["mock", "github", "google", "searxng", "openclaw", "all"], default="mock", help="Provider to use")
     parser.add_argument("--openclaw-file", type=Path, help="Path to a JSON listing export from OpenClaw or another browser agent")
     parser.add_argument("--dry-run", action="store_true", help="Do not write state to seen.json")
     parser.add_argument("--reset-seen", action="store_true", help="Clear seen.json before running")
@@ -72,6 +73,9 @@ def main():
     if provider_choice == "google" or (args.mode == "live" and provider_choice == "all"):
         providers.append(GoogleSearchProvider(config))
 
+    if provider_choice == "searxng" or (args.mode == "live" and provider_choice == "all"):
+        providers.append(SearXNGSearchProvider(config))
+
     if provider_choice == "openclaw" or (args.mode == "live" and provider_choice == "all"):
         providers.append(OpenClawFileProvider(config, args.openclaw_file))
     
@@ -108,8 +112,8 @@ def main():
         new_listings, seen = dedupe_listings(kept, state_manager)
         scored = score_listings(new_listings, config)
         
-        generate_report(scored, skipped, results_file)
-        generate_html_report(scored, skipped, html_file)
+        generate_report(scored, skipped, results_file, config)
+        generate_html_report(scored, skipped, html_file, config)
         
         # Write state
         if not args.dry_run:

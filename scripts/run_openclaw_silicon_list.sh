@@ -13,6 +13,10 @@ MAX_LISTINGS="${OPENCLAW_MAX_LISTINGS:-30}"
 OPENCLAW_MODEL="${OPENCLAW_MODEL:-}"
 SEARCH_WIDTH="${OPENCLAW_SEARCH_WIDTH:-broad}"
 
+if [[ -z "${SEARXNG_BASE_URL:-}" && -n "${SEARXNG_URL:-}" ]]; then
+  export SEARXNG_BASE_URL="$SEARXNG_URL"
+fi
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--skip-openclaw] [--no-reset-seen] [--no-open-html]
@@ -34,6 +38,9 @@ Environment overrides:
   OPENCLAW_MAX_LISTINGS
   OPENCLAW_MODEL
   OPENCLAW_SEARCH_WIDTH
+  OPENCLAW_SKIP_WEB_KEY_CHECK=1
+  SEARXNG_URL
+  SEARXNG_BASE_URL
 EOF
 }
 
@@ -85,6 +92,63 @@ process.stdout.write(token);
 " "$OPENCLAW_CONFIG"
 }
 
+has_openclaw_web_key() {
+  [[ -n "${BRAVE_API_KEY:-}" ]] && return 0
+
+  node -e "
+const fs = require('fs');
+const path = process.argv[1];
+const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+const candidates = [
+  config?.web?.brave?.apiKey,
+  config?.web?.brave?.api_key,
+  config?.web?.braveApiKey,
+  config?.tools?.web?.brave?.apiKey,
+  config?.tools?.web_search?.brave?.apiKey,
+  config?.search?.brave?.apiKey,
+];
+process.exit(candidates.some(Boolean) ? 0 : 1);
+" "$OPENCLAW_CONFIG"
+}
+
+has_openclaw_web_search_provider() {
+  node -e "
+const fs = require('fs');
+const path = process.argv[1];
+const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+const search = config?.tools?.web?.search;
+const provider = search?.provider;
+const enabled = search?.enabled !== false;
+process.exit(provider && enabled ? 0 : 1);
+" "$OPENCLAW_CONFIG"
+}
+
+require_openclaw_web_search_config() {
+  if [[ "${OPENCLAW_SKIP_WEB_KEY_CHECK:-0}" == "1" ]]; then
+    return
+  fi
+
+  if has_openclaw_web_search_provider; then
+    return
+  fi
+
+  if has_openclaw_web_key; then
+    return
+  fi
+
+  cat >&2 <<EOF
+OpenClaw web search is not configured. This workflow uses OpenClaw web_search.
+
+Run:
+  openclaw configure --section web
+
+Or export BRAVE_API_KEY before running this script if you use Brave search.
+To bypass this preflight:
+  OPENCLAW_SKIP_WEB_KEY_CHECK=1 $(basename "$0")
+EOF
+  exit 1
+}
+
 validate_export() {
   "$PYTHON_BIN" - "$EXPORT_FILE" <<'PY'
 import json
@@ -119,6 +183,56 @@ restore_export_if_missing() {
   fi
 }
 
+complete_openclaw_bootstrap() {
+  local workspace="$1"
+  local bootstrap_file="$workspace/BOOTSTRAP.md"
+
+  if [[ ! -f "$bootstrap_file" ]]; then
+    return
+  fi
+
+  echo "Completing OpenClaw bootstrap for unattended run..."
+  mkdir -p "$workspace"
+  cat >"$workspace/IDENTITY.md" <<'EOF'
+# IDENTITY.md - Who Am I?
+
+- **Name:** OpenClaw
+- **Creature:** AI assistant
+- **Vibe:** Direct, practical, and task-focused
+- **Emoji:** :lobster:
+- **Avatar:**
+
+## Operating Notes
+
+For Silicon List runs, prioritize the requested data collection task over onboarding.
+EOF
+
+  cat >"$workspace/USER.md" <<'EOF'
+# USER.md - About Your Human
+
+- **Name:** Ethan
+- **What to call them:** Ethan
+- **Pronouns:** _(optional)_
+- **Timezone:** America/Chicago
+- **Notes:** Wants current hardware, silicon, FPGA, RTL, ASIC, verification, firmware, and embedded systems internship/co-op listings.
+
+## Context
+
+This workspace is used for unattended Silicon List job-search exports. Do not pause for identity setup during these runs.
+EOF
+
+  if [[ -f "$workspace/SOUL.md" ]] && ! grep -q "Silicon List unattended runs" "$workspace/SOUL.md"; then
+    cat >>"$workspace/SOUL.md" <<'EOF'
+
+## Silicon List unattended runs
+
+When invoked by the Silicon List runner, complete the requested listing search and write the requested JSON export without stopping for onboarding.
+EOF
+  fi
+
+  rm "$bootstrap_file"
+}
+
 require_command node
 if command -v python >/dev/null 2>&1; then
   PYTHON_BIN="python"
@@ -141,6 +255,8 @@ if [[ "$SKIP_OPENCLAW" -eq 0 ]]; then
   fi
 
   export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$(extract_gateway_token)}"
+  complete_openclaw_bootstrap "$OPENCLAW_WORKSPACE"
+  require_openclaw_web_search_config
 
   if [[ -n "$OPENCLAW_MODEL" ]]; then
     echo "Setting OpenClaw model to $OPENCLAW_MODEL..."

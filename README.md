@@ -24,7 +24,7 @@ silicon-list --mode live --provider all
 
 **Options:**
 - `--mode mock|live`: Whether to use live data (GitHub fetching) or mock data.
-- `--provider mock|github|google|openclaw|all`: Which provider to use.
+- `--provider mock|github|google|searxng|openclaw|all`: Which provider to use.
 - `--openclaw-file PATH`: Import a JSON listing export from OpenClaw or another browser agent.
 - `--output-dir PATH`: Override the default directory for files (`~/.silicon-list`).
 - `--write-default-config`: Writes the default configuration file and exits.
@@ -50,6 +50,54 @@ silicon-list --mode live --provider all
 ```
 
 If those variables are not set, the GitHub provider will still run, and the CLI will print a provider error explaining that Google search was skipped.
+
+## SearXNG Setup
+
+Silicon List can query a local SearXNG instance through its JSON API. A local SearXNG Docker instance does not require an API key.
+
+By default, the provider uses:
+
+```bash
+http://localhost:8080
+```
+
+You can verify the JSON API directly:
+
+```bash
+curl "http://localhost:8080/search?q=fpga+internship&format=json"
+```
+
+Run only the SearXNG provider:
+
+```bash
+silicon-list --mode live --provider searxng
+```
+
+Override the SearXNG base URL with `SEARXNG_URL`:
+
+```bash
+SEARXNG_URL=http://localhost:8080 silicon-list --mode live --provider searxng
+```
+
+SearXNG is also included in `--provider all`:
+
+```bash
+SEARXNG_URL=http://localhost:8080 silicon-list --mode live --provider all
+```
+
+The default config includes focused SearXNG query templates for hardware, silicon, FPGA, RTL, ASIC, verification/DV, firmware, embedded systems, internships, and co-ops across Summer 2026, Fall 2026, Spring 2027, and Summer 2027. Generate and edit them with:
+
+```bash
+silicon-list --write-default-config
+```
+
+Useful crowd-control config fields:
+
+- `max_report_listings`: Caps how many scored listings are shown in the report.
+- `max_listing_age_days`: Skips listings with parseable posted dates older than this many days.
+- `keep_unknown_posted_at`: Keeps listings when the source does not provide a posted date. Set this to `false` for strict date-only reports.
+- `target_cycle_keywords`: Keeps explicit posting years/seasons focused on the cycles you care about.
+- `description_categories`: Controls the report sections generated from job description/title keywords.
 
 ## OpenClaw / Browser Agent Imports
 
@@ -83,7 +131,7 @@ Then run:
 silicon-list --mode live --provider openclaw
 ```
 
-Or combine GitHub, Google, and OpenClaw imports:
+Or combine GitHub, Google, SearXNG, and OpenClaw imports:
 
 ```bash
 silicon-list --mode live --provider all

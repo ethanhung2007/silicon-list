@@ -3,23 +3,39 @@ from html import escape
 from pathlib import Path
 from typing import List, Tuple
 from silicon_list.models import ScoredListing, Listing
+from silicon_list.config import Config
+
+def categorize_listing(listing: Listing, config: Config) -> str:
+    text = f"{listing.role} {listing.description}".lower()
+    for category, keywords in config.description_categories.items():
+        if any(keyword.lower() in text for keyword in keywords):
+            return category
+    return "Other Relevant"
+
+def prepare_report_sections(scored_listings: List[ScoredListing], config: Config) -> list[tuple[str, list[ScoredListing]]]:
+    max_report_listings = getattr(config, "max_report_listings", 0)
+    sorted_listings = sorted(scored_listings, key=lambda s: s.score, reverse=True)
+    if max_report_listings:
+        sorted_listings = sorted_listings[:max_report_listings]
+
+    grouped: dict[str, list[ScoredListing]] = {}
+    for scored in sorted_listings:
+        grouped.setdefault(categorize_listing(scored.listing, config), []).append(scored)
+
+    category_order = list(config.description_categories.keys()) + ["Other Relevant"]
+    return [(category, grouped[category]) for category in category_order if grouped.get(category)]
 
 def generate_report(
     scored_listings: List[ScoredListing], 
     skipped: List[Tuple[Listing, str]], 
-    output_path: Path
+    output_path: Path,
+    config: Config | None = None,
 ):
     """Writes the results to a markdown report."""
     
+    config = config or Config()
     date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    
-    t1 = [s for s in scored_listings if s.tier == 1]
-    t2 = [s for s in scored_listings if s.tier == 2]
-    t3 = [s for s in scored_listings if s.tier == 3]
-    
-    t1.sort(key=lambda x: x.score, reverse=True)
-    t2.sort(key=lambda x: x.score, reverse=True)
-    t3.sort(key=lambda x: x.score, reverse=True)
+    sections = prepare_report_sections(scored_listings, config)
     
     skipped_hard = [s for s, reason in skipped if reason == "hard_exclusion"]
     skipped_companies = list(set([s.company for s in skipped_hard]))
@@ -27,21 +43,19 @@ def generate_report(
     
     lines = []
     lines.append(f"# Silicon List — {date_str}")
-    lines.append(f"{len(scored_listings)} new listings found")
+    shown_count = sum(len(section_list) for _, section_list in sections)
+    lines.append(f"{shown_count} listings shown from {len(scored_listings)} new listings found")
     lines.append("")
     
-    def _write_tier(tier_num: int, tier_name: str, tier_list: List[ScoredListing]):
-        lines.append(f"## Tier {tier_num} ({tier_name})")
-        lines.append("| Company | Role | Location | Score | Apply |")
-        lines.append("|---|---|---|---:|---|")
-        for s in tier_list:
+    for category, category_list in sections:
+        lines.append(f"## {category}")
+        lines.append("| Company | Role | Location | Posted | Score | Apply |")
+        lines.append("|---|---|---|---|---:|---|")
+        for s in category_list:
             apply_link = f"[Apply]({s.listing.apply_url})" if s.listing.apply_url else "No link"
-            lines.append(f"| {s.listing.company} | {s.listing.role} | {s.listing.location} | {s.score} | {apply_link} |")
+            posted = s.listing.posted_at or "Unknown"
+            lines.append(f"| {s.listing.company} | {s.listing.role} | {s.listing.location} | {posted} | {s.score} | {apply_link} |")
         lines.append("")
-        
-    _write_tier(1, "score 8–10", t1)
-    _write_tier(2, "score 5–7", t2)
-    _write_tier(3, "score 1–4", t3)
     
     lines.append("## Skipped (hard eligibility restrictions)")
     if skipped_hard:
@@ -56,16 +70,15 @@ def generate_report(
 def generate_html_report(
     scored_listings: List[ScoredListing],
     skipped: List[Tuple[Listing, str]],
-    output_path: Path
+    output_path: Path,
+    config: Config | None = None,
 ):
     """Writes the results to a browser-friendly HTML report."""
 
+    config = config or Config()
     date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    tiers = [
-        (1, "score 8-10", sorted([s for s in scored_listings if s.tier == 1], key=lambda x: x.score, reverse=True)),
-        (2, "score 5-7", sorted([s for s in scored_listings if s.tier == 2], key=lambda x: x.score, reverse=True)),
-        (3, "score 1-4", sorted([s for s in scored_listings if s.tier == 3], key=lambda x: x.score, reverse=True)),
-    ]
+    sections_data = prepare_report_sections(scored_listings, config)
+    shown_count = sum(len(section_list) for _, section_list in sections_data)
 
     skipped_hard = [s for s, reason in skipped if reason == "hard_exclusion"]
     skipped_companies = sorted(set(s.company for s in skipped_hard))
@@ -80,6 +93,7 @@ def generate_html_report(
         source = escape(listing.source.replace("_", " ").title())
         tools = ", ".join(listing.tools_found) if listing.tools_found else ""
         meta = " / ".join(part for part in [source, listing.cycle, tools] if part)
+        posted = listing.posted_at or "Unknown"
         return f"""
             <tr>
               <td>
@@ -88,25 +102,27 @@ def generate_html_report(
               </td>
               <td>{escape(listing.role)}</td>
               <td>{escape(listing.location or "Unknown")}</td>
+              <td>{escape(posted)}</td>
               <td class="score">{s.score}</td>
               <td>{apply_link}</td>
             </tr>
         """
 
     sections = []
-    for tier_num, tier_name, tier_list in tiers:
-        rows = "\n".join(listing_row(s) for s in tier_list)
+    for category, category_list in sections_data:
+        rows = "\n".join(listing_row(s) for s in category_list)
         if not rows:
-            rows = '<tr><td colspan="5" class="empty">No listings in this tier.</td></tr>'
+            rows = '<tr><td colspan="6" class="empty">No listings in this category.</td></tr>'
         sections.append(f"""
           <section>
-            <h2>Tier {tier_num} <small>{tier_name}</small></h2>
+            <h2>{escape(category)}</h2>
             <table>
               <thead>
                 <tr>
                   <th>Company</th>
                   <th>Role</th>
                   <th>Location</th>
+                  <th>Posted</th>
                   <th>Score</th>
                   <th>Apply</th>
                 </tr>
@@ -242,7 +258,7 @@ def generate_html_report(
 <body>
   <header>
     <h1>Silicon List</h1>
-    <p class="summary">{len(scored_listings)} new listings found on {date_str}</p>
+    <p class="summary">{shown_count} listings shown from {len(scored_listings)} new listings found on {date_str}</p>
   </header>
   <main>
     {"".join(sections)}
