@@ -20,3 +20,9 @@ def test_google_search_item_to_listing():
     assert listing.apply_url == "https://jobs.example.com/firmware-intern"
     assert listing.description == "Work on embedded systems and RTOS firmware."
     assert listing.raw_metadata["query"] == "firmware engineering intern 2026"
+
+
+def test_google_search_includes_job_board_queries_for_existing_configs():
+    provider = GoogleSearchProvider(Config(search_queries=["fpga intern"], job_board_search_queries=["fpga intern", "site:indeed.com/viewjob fpga intern"]))
+
+    assert provider._search_queries() == ["fpga intern", "site:indeed.com/viewjob fpga intern"]

@@ -98,3 +98,51 @@ def test_parse_html_table(provider):
     assert listings[1].company == "Analog Devices"
     assert listings[1].role == "R&D Engineering Co-op"
     assert listings[1].apply_url == "https://baxter.com/apply"
+
+def test_parse_hardware_lines_when_no_hardware_section(provider):
+    markdown = """
+# Hardware-ish jobs
+- Chip Co - FPGA Internship Summer 2026 - https://jobs.lever.co/chipco/abc123
+- Web Co - Frontend Internship - https://example.com/web
+- Robo Co | Robotics Firmware Intern | https://jobs.ashbyhq.com/roboco/abc12345-1234-1234-1234-123456789abc
+    """
+
+    listings = provider._parse_markdown(markdown, source_url="https://github.com/example/list")
+
+    assert len(listings) == 2
+    assert listings[0].company == "Chip Co"
+    assert listings[0].role == "FPGA Internship Summer 2026"
+    assert listings[0].source_url == "https://github.com/example/list"
+    assert listings[1].company == "Robo Co"
+
+def test_github_search_item_to_listing(provider):
+    listing = provider._search_item_to_listing(
+        {
+            "id": 123,
+            "title": "ASIC Verification Internship Summer 2026 - Chip Co",
+            "body": "Apply at https://jobs.lever.co/chipco/verify123. Work with SystemVerilog and UVM.",
+            "html_url": "https://github.com/org/repo/issues/1",
+        },
+        '"asic internship" "2026"',
+    )
+
+    assert listing is not None
+    assert listing.source == "github_search"
+    assert listing.apply_url == "https://jobs.lever.co/chipco/verify123"
+    assert listing.source_url == "https://github.com/org/repo/issues/1"
+    assert listing.cycle == "Summer 2026"
+
+def test_github_search_rate_limit_is_nonfatal(provider, monkeypatch):
+    class FakeResponse:
+        status_code = 403
+        text = "API rate limit exceeded"
+
+        def json(self):
+            return {}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        return FakeResponse()
+
+    monkeypatch.setattr("silicon_list.providers.github_simplify.requests.get", fake_get)
+
+    assert provider._fetch_search_listings() == []

@@ -3,6 +3,11 @@ import re
 from typing import List, Tuple
 from silicon_list.models import Listing
 from silicon_list.config import Config
+from silicon_list.pipeline.link_validation import (
+    is_generic_url,
+    is_specific_job_posting_url,
+    validate_listing_link,
+)
 
 ELIGIBILITY_EXCLUSION_PATTERNS = [
     re.compile(r"\bclearance\b", re.IGNORECASE),
@@ -15,24 +20,14 @@ ELIGIBILITY_EXCLUSION_PATTERNS = [
     re.compile(r"🇺🇸"),
 ]
 
-GENERIC_OPENCLAW_URL_PATTERNS = [
-    re.compile(r"/careers?/?(?:$|[?#])", re.IGNORECASE),
-    re.compile(r"/jobs?/?(?:$|[?#])", re.IGNORECASE),
-    re.compile(r"/search/?(?:$|[?#])", re.IGNORECASE),
-    re.compile(r"/internships?/?(?:$|[?#])", re.IGNORECASE),
-    re.compile(r"/(?:jobs?|careers?)/search", re.IGNORECASE),
-    re.compile(r"/(?:jobs?|careers?)/internships?", re.IGNORECASE),
-    re.compile(r"optiver\.com/working-at-optiver/career-opportunities/", re.IGNORECASE),
-]
-
-GENERIC_OPENCLAW_DOMAINS = [
-    "applybolt.app",
-]
-
 BAD_APPLY_URL_PATTERNS = [
     re.compile(r"/apply/(?:autofillWithResume|useMyLastApplication)/?$", re.IGNORECASE),
-    re.compile(r"linkedin\.com/jobs/view/", re.IGNORECASE),
     re.compile(r"linkedin\.com/jobs/search", re.IGNORECASE),
+    re.compile(r"indeed\.com/jobs(?:/)?(?:$|[?#])", re.IGNORECASE),
+    re.compile(r"indeed\.com/career", re.IGNORECASE),
+    re.compile(r"glassdoor\.com/(?:Job|job-search|Jobs)(?:/)?(?:$|[?#])", re.IGNORECASE),
+    re.compile(r"glassdoor\.com/Job/jobs\.htm", re.IGNORECASE),
+    re.compile(r"(?:app\.)?joinhandshake\.com/stu/postings(?:$|[?#])", re.IGNORECASE),
     re.compile(r"ev\.careers/jobs/", re.IGNORECASE),
     re.compile(r"gradconnection\.com/", re.IGNORECASE),
     re.compile(r"careers\.smartrecruiters\.com/[^/?#]+/?(?:$|[?#])", re.IGNORECASE),
@@ -60,15 +55,14 @@ def is_generic_openclaw_listing(listing: Listing) -> bool:
     if listing.source != "openclaw":
         return False
 
-    url_lower = listing.apply_url.lower()
     role_lower = listing.role.lower()
     text_lower = f"{listing.role} {listing.description}".lower()
 
-    if any(domain in url_lower for domain in GENERIC_OPENCLAW_DOMAINS):
-        return True
     if any(phrase in text_lower for phrase in GENERIC_OPENCLAW_ROLE_PHRASES):
         return True
-    if any(pattern.search(url_lower) for pattern in GENERIC_OPENCLAW_URL_PATTERNS):
+    if is_generic_url(listing.apply_url):
+        return True
+    if not is_specific_job_posting_url(listing.apply_url):
         return True
 
     generic_role = role_lower in {
@@ -77,7 +71,7 @@ def is_generic_openclaw_listing(listing: Listing) -> bool:
         "hardware intern",
         "internships",
     }
-    has_specific_url = any(token in url_lower for token in ["/job/", "/jobs/", "jobid=", "gh_jid=", "lever.co", "greenhouse.io", "ashbyhq.com", "workdayjobs.com"])
+    has_specific_url = is_specific_job_posting_url(listing.apply_url)
     return generic_role and not has_specific_url
 
 def has_bad_apply_url(listing: Listing) -> bool:
@@ -154,7 +148,7 @@ def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listi
     # Pre-compile lowercased rules
     target_keywords = [kw.lower() for kw in config.target_keywords]
     
-    senior_keywords = ["senior", "sr", "principal", "staff", "lead", "manager", "director", "full-time", "full time", "postgrad", "new grad", "new college grad", "graduate"]
+    senior_keywords = ["senior", "sr", "principal", "staff", "lead", "manager", "director", "full-time", "full time", "postgrad"]
     
     for lst in listings:
         text_to_search = f"{lst.role} {lst.description}".lower()
@@ -165,10 +159,6 @@ def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listi
             skipped.append((lst, "hard_exclusion"))
             continue
 
-        if has_bad_apply_url(lst):
-            skipped.append((lst, "bad_apply_url"))
-            continue
-
         if is_too_old(lst, config):
             skipped.append((lst, "too_old"))
             continue
@@ -177,13 +167,27 @@ def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listi
             skipped.append((lst, "wrong_cycle"))
             continue
 
-        if is_generic_openclaw_listing(lst):
-            skipped.append((lst, "generic_listing"))
+        link_validation = validate_listing_link(lst)
+        if not link_validation.valid:
+            skipped.append((lst, link_validation.reason))
             continue
 
         if lst.source == "openclaw":
-            is_student_role = "intern" in role_lower or "co-op" in role_lower or "coop" in role_lower
-            is_student_desc = "intern" in text_to_search or "co-op" in text_to_search or "coop" in text_to_search
+            is_student_role = (
+                "intern" in role_lower
+                or "co-op" in role_lower
+                or "coop" in role_lower
+                or "new grad" in role_lower
+                or "new college grad" in role_lower
+                or "graduate" in role_lower
+            )
+            is_student_desc = (
+                "intern" in text_to_search
+                or "co-op" in text_to_search
+                or "coop" in text_to_search
+                or "new grad" in text_to_search
+                or "new college grad" in text_to_search
+            )
             if not is_student_role and not is_student_desc:
                 skipped.append((lst, "not_student_role"))
                 continue

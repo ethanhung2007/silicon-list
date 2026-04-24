@@ -23,9 +23,10 @@ def test_generate_report(tmp_path: Path):
     assert "2 listings shown from 2 new listings found" in content
     assert "## FPGA / RTL / ASIC / DV" in content
     assert "## Firmware / Embedded" in content
-    assert "| Company | Role | Location | Posted | Score | Apply |" in content
-    assert "| NVIDIA | ASIC Design Intern | CA | 2d | 9 | [Apply](http://x) |" in content
-    assert "| Apple | Firmware Intern | CA | Oct 1 | 6 | [Apply](http://y) |" in content
+    assert "| Company | Role Title | Location | Type | Date Found | Source | Direct Apply Link | Confidence Score | Tags |" in content
+    assert "| NVIDIA | ASIC Design Intern | CA | Intern |" in content
+    assert "| Apple | Firmware Intern | CA | Intern |" in content
+    assert "| [link](http://x) | 9 | ASIC, RTL, Verification |" in content
     assert "1 listings skipped — SecretCo" in content
 
 def test_generate_html_report(tmp_path: Path):
@@ -46,7 +47,8 @@ def test_generate_html_report(tmp_path: Path):
     assert "NVIDIA" in content
     assert "ASIC Design Intern" in content
     assert "FPGA / RTL / ASIC / DV" in content
-    assert "1d" in content
+    assert "Intern" in content
+    assert "Github Simplify" in content
     assert 'href="http://x"' in content
     assert "SecretCo" in content
 

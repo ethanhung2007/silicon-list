@@ -6,6 +6,7 @@ from typing import Any, List
 import requests
 
 from silicon_list.models import Listing
+from silicon_list.pipeline.normalize import normalize_apply_url
 from silicon_list.providers.base import BaseProvider, ProviderError, RateLimitError
 
 
@@ -25,10 +26,17 @@ class GoogleSearchProvider(BaseProvider):
             )
 
         listings: list[Listing] = []
-        for query in self.config.search_queries:
+        for query in self._search_queries():
             listings.extend(self._fetch_query(query, api_key, cse_id))
 
         return listings
+
+    def _search_queries(self) -> list[str]:
+        queries = [
+            *getattr(self.config, "search_queries", []),
+            *getattr(self.config, "job_board_search_queries", []),
+        ]
+        return list(dict.fromkeys(query for query in queries if query))
 
     def _fetch_query(self, query: str, api_key: str, cse_id: str) -> List[Listing]:
         params = {
@@ -57,7 +65,8 @@ class GoogleSearchProvider(BaseProvider):
     def _item_to_listing(self, item: dict[str, Any], query: str) -> Listing:
         title = self._clean_text(item.get("title", ""))
         snippet = self._clean_text(item.get("snippet", ""))
-        link = item.get("link", "").strip()
+        raw_link = item.get("link", "").strip()
+        link = normalize_apply_url(raw_link)
         company = self._infer_company(title, link)
         source_job_id = hashlib.md5(link.encode("utf-8")).hexdigest()[:16]
 
@@ -68,6 +77,9 @@ class GoogleSearchProvider(BaseProvider):
             role=title or "Search result",
             location="",
             apply_url=link,
+            original_url=raw_link,
+            canonical_url=link,
+            source_url=link,
             description=snippet,
             cycle="",
             raw_metadata={"query": query},

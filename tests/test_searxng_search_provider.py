@@ -19,7 +19,8 @@ def test_searxng_provider_fetches_and_filters_results(monkeypatch):
     config = Config(
         searxng_search_queries=[
             "site:greenhouse.io fpga internship summer 2026",
-        ]
+        ],
+        searxng_job_board_search_queries=[],
     )
     provider = SearXNGSearchProvider(config)
     calls = []
@@ -65,13 +66,22 @@ def test_searxng_provider_fetches_and_filters_results(monkeypatch):
 
 def test_searxng_provider_uses_env_url(monkeypatch):
     monkeypatch.setenv("SEARXNG_URL", "http://localhost:9999/")
-    provider = SearXNGSearchProvider(Config(searxng_search_queries=[]))
+    provider = SearXNGSearchProvider(Config(searxng_search_queries=[], searxng_job_board_search_queries=[]))
 
     assert provider.base_url == "http://localhost:9999"
 
 
+def test_searxng_provider_includes_job_board_queries_for_existing_configs():
+    provider = SearXNGSearchProvider(Config(
+        searxng_search_queries=["fpga intern"],
+        searxng_job_board_search_queries=["fpga intern", "site:linkedin.com/jobs/view fpga intern"],
+    ))
+
+    assert provider._search_queries() == ["fpga intern", "site:linkedin.com/jobs/view fpga intern"]
+
+
 def test_searxng_provider_dedupes_results(monkeypatch):
-    config = Config(searxng_search_queries=["fpga intern", "hardware intern"])
+    config = Config(searxng_search_queries=["fpga intern", "hardware intern"], searxng_job_board_search_queries=[])
     provider = SearXNGSearchProvider(config)
 
     def fake_get(url, params, timeout):
@@ -93,8 +103,37 @@ def test_searxng_provider_dedupes_results(monkeypatch):
     assert listings[0].company == "Chip Co"
 
 
+def test_searxng_provider_accepts_exact_job_board_postings(monkeypatch):
+    config = Config(searxng_search_queries=["job board hardware intern"], searxng_job_board_search_queries=[])
+    provider = SearXNGSearchProvider(config)
+
+    def fake_get(url, params, timeout):
+        return FakeResponse(payload={
+            "results": [
+                {
+                    "title": "Hardware Engineering Intern - Example Robotics",
+                    "url": "https://www.indeed.com/viewjob?jk=abc123&utm_source=test",
+                    "content": "Summer 2026 internship using FPGA and embedded hardware skills.",
+                },
+                {
+                    "title": "Hardware intern jobs in Austin, TX",
+                    "url": "https://www.indeed.com/jobs?q=hardware+intern&l=Austin%2C+TX",
+                    "content": "Search results for jobs in Austin.",
+                },
+            ]
+        })
+
+    monkeypatch.setattr("silicon_list.providers.searxng_search.requests.get", fake_get)
+
+    listings = provider.fetch_listings()
+
+    assert len(listings) == 1
+    assert listings[0].company == "Example Robotics"
+    assert listings[0].apply_url == "https://www.indeed.com/viewjob?jk=abc123"
+
+
 def test_searxng_provider_raises_rate_limit(monkeypatch):
-    provider = SearXNGSearchProvider(Config(searxng_search_queries=["fpga intern"]))
+    provider = SearXNGSearchProvider(Config(searxng_search_queries=["fpga intern"], searxng_job_board_search_queries=[]))
 
     def fake_get(url, params, timeout):
         return FakeResponse(status_code=429, text="too many requests")
@@ -106,7 +145,7 @@ def test_searxng_provider_raises_rate_limit(monkeypatch):
 
 
 def test_searxng_provider_raises_provider_error_for_invalid_json(monkeypatch):
-    provider = SearXNGSearchProvider(Config(searxng_search_queries=["fpga intern"]))
+    provider = SearXNGSearchProvider(Config(searxng_search_queries=["fpga intern"], searxng_job_board_search_queries=[]))
 
     class BadJsonResponse(FakeResponse):
         def json(self):

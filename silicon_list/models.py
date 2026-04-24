@@ -9,6 +9,10 @@ class Listing:
     role: str
     location: str
     apply_url: str
+    original_url: str = ""
+    canonical_url: str = ""
+    source_url: str = ""
+    alternate_urls: list[str] = field(default_factory=list)
     description: str = ""
     posted_at: Optional[str] = None
     cycle: str = ""

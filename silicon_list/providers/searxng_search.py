@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import requests
 
 from silicon_list.models import Listing
+from silicon_list.pipeline.normalize import normalize_apply_url
 from silicon_list.providers.base import BaseProvider, ProviderError, RateLimitError
 
 
@@ -23,6 +24,14 @@ class SearXNGSearchProvider(BaseProvider):
         "icims.com",
         "oraclecloud.com",
         "successfactors.com",
+        "indeed.com/viewjob",
+        "indeed.com/jobs/view",
+        "glassdoor.com/job-listing",
+        "linkedin.com/jobs/view",
+        "joinhandshake.com/stu/jobs",
+        "app.joinhandshake.com/stu/jobs",
+        "simplify.jobs/p/",
+        "/stu/postings",
         "jobs.",
         "/job/",
         "/jobs/",
@@ -34,8 +43,11 @@ class SearXNGSearchProvider(BaseProvider):
 
     JUNK_URL_TOKENS = [
         "linkedin.com/jobs/search",
-        "indeed.com",
-        "glassdoor.com",
+        "indeed.com/jobs?q=",
+        "indeed.com/jobs?",
+        "indeed.com/career",
+        "glassdoor.com/job-search",
+        "glassdoor.com/jobs",
         "ziprecruiter.com",
         "monster.com",
         "simplyhired.com",
@@ -90,7 +102,7 @@ class SearXNGSearchProvider(BaseProvider):
         listings: list[Listing] = []
         seen: set[tuple[str, str, str]] = set()
 
-        for query in self.config.searxng_search_queries:
+        for query in self._search_queries():
             for item in self._fetch_query(query):
                 listing = self._item_to_listing(item, query)
                 if not listing or not self._looks_useful(listing):
@@ -107,6 +119,13 @@ class SearXNGSearchProvider(BaseProvider):
                 listings.append(listing)
 
         return listings
+
+    def _search_queries(self) -> list[str]:
+        queries = [
+            *getattr(self.config, "searxng_search_queries", []),
+            *getattr(self.config, "searxng_job_board_search_queries", []),
+        ]
+        return list(dict.fromkeys(query for query in queries if query))
 
     def _fetch_query(self, query: str) -> list[dict[str, Any]]:
         params = {
@@ -140,7 +159,8 @@ class SearXNGSearchProvider(BaseProvider):
     def _item_to_listing(self, item: dict[str, Any], query: str) -> Listing | None:
         title = self._clean_text(item.get("title", ""))
         snippet = self._clean_text(item.get("content") or item.get("snippet") or "")
-        link = self._normalize_url(str(item.get("url", "")).strip())
+        raw_link = str(item.get("url", "")).strip()
+        link = normalize_apply_url(self._normalize_url(raw_link))
 
         if not title or not link.startswith(("http://", "https://")):
             return None
@@ -155,6 +175,9 @@ class SearXNGSearchProvider(BaseProvider):
             role=title,
             location="",
             apply_url=link,
+            original_url=raw_link,
+            canonical_url=link,
+            source_url=link,
             description=snippet,
             cycle=self._infer_cycle(f"{title} {snippet} {query}"),
             raw_metadata={

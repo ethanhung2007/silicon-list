@@ -17,5 +17,8 @@ dev = [
     "pytest",
 ]
 
+[tool.setuptools.packages.find]
+include = ["silicon_list*"]
+
 [project.scripts]
 silicon-list = "silicon_list.main:main"
