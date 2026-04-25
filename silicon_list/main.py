@@ -14,8 +14,7 @@ from silicon_list.providers.mock_provider import MockProvider
 from silicon_list.providers.github_simplify import GitHubSimplifyProvider
 from silicon_list.providers.google_search import GoogleSearchProvider
 from silicon_list.providers.searxng_search import SearXNGSearchProvider
-from silicon_list.providers.openclaw_file import OpenClawFileProvider
-from silicon_list.providers.hermes import HermesProvider
+from silicon_list.providers.cowork import CoworkProvider
 
 from silicon_list.pipeline.normalize import normalize_listings
 from silicon_list.pipeline.filtering import filter_listings
@@ -31,7 +30,14 @@ def str_to_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def build_legacy_providers(config: Config, provider_choice: str, mode: str, include_github_only: bool, openclaw_file: Path | None, hermes_file: Path | None = None):
+def build_legacy_providers(
+    config: Config,
+    provider_choice: str,
+    mode: str,
+    include_github_only: bool,
+    cowork_file: Path | None,
+    skip_cowork_run: bool = False,
+):
     providers = []
 
     if mode == "live" and provider_choice == "mock":
@@ -46,11 +52,8 @@ def build_legacy_providers(config: Config, provider_choice: str, mode: str, incl
     if provider_choice == "searxng":
         providers.append(("legacy", SearXNGSearchProvider(config)))
 
-    if provider_choice == "openclaw" or (mode == "live" and provider_choice == "all"):
-        providers.append(("legacy", OpenClawFileProvider(config, openclaw_file)))
-
-    if provider_choice == "hermes" or (mode == "live" and provider_choice == "all" and (hermes_file or config.hermes_enabled)):
-        providers.append(("legacy", HermesProvider(config, hermes_file)))
+    if provider_choice == "cowork" or (mode == "live" and provider_choice == "all"):
+        providers.append(("legacy", CoworkProvider(config, cowork_file, skip_run=skip_cowork_run)))
 
     if provider_choice == "mock" or (mode == "mock" and provider_choice == "all"):
         if not include_github_only:
@@ -60,7 +63,6 @@ def build_legacy_providers(config: Config, provider_choice: str, mode: str, incl
 
 
 def _searxng_available(config: Config) -> bool:
-    """Return True only when SEARXNG_URL is explicitly set and the instance responds."""
     import os
     env_key = getattr(config, "searxng_url_env", "SEARXNG_URL")
     url = os.getenv(env_key)
@@ -82,7 +84,14 @@ def _google_available(config: Config) -> bool:
     )
 
 
-def build_hybrid_stages(config: Config, provider_choice: str, mode: str, include_github_only: bool, openclaw_file: Path | None, hermes_file: Path | None = None):
+def build_hybrid_stages(
+    config: Config,
+    provider_choice: str,
+    mode: str,
+    include_github_only: bool,
+    cowork_file: Path | None,
+    skip_cowork_run: bool = False,
+):
     if mode == "live" and provider_choice == "mock":
         provider_choice = "all"
 
@@ -101,17 +110,13 @@ def build_hybrid_stages(config: Config, provider_choice: str, mode: str, include
     if provider_choice == "searxng" or (provider_choice == "all" and _searxng_available(config)):
         stage1.append(("stage1", SearXNGSearchProvider(config)))
 
-    if provider_choice == "openclaw" or (provider_choice == "all" and config.openclaw_stage2):
-        stage2.append(("stage2", OpenClawFileProvider(config, openclaw_file)))
-
-    if provider_choice == "hermes" or (provider_choice == "all" and (hermes_file or config.hermes_enabled)):
-        stage2.append(("stage2", HermesProvider(config, hermes_file)))
+    if provider_choice == "cowork" or (provider_choice == "all" and config.cowork_stage2):
+        stage2.append(("stage2", CoworkProvider(config, cowork_file, skip_run=skip_cowork_run)))
 
     return stage1 + stage2
 
 
 def _run_validate_only(config: Config, output_dir: Path, errors_file: Path, no_open_html: bool):
-    """Re-validate all active DB listings without fetching new ones."""
     from silicon_list.storage.database import ListingsDatabase
     from silicon_list.validator import ListingValidator, ValidationStatus
     from silicon_list.models import Listing, ScoredListing
@@ -161,30 +166,31 @@ def _run_validate_only(config: Config, output_dir: Path, errors_file: Path, no_o
 
 def main():
     parser = argparse.ArgumentParser(description="Silicon List CLI")
-    parser.add_argument("--mode", choices=["mock", "live"], default="mock", help="Run mode")
-    parser.add_argument("--pipeline", choices=["hybrid", "legacy"], help="Sourcing pipeline to use")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_DIR, help="Output directory")
-    parser.add_argument("--write-default-config", action="store_true", help="Write default config and exit")
-    parser.add_argument("--print-report", action="store_true", help="Print the report to stdout instead of file")
-    parser.add_argument("--include-github-only", action="store_true", help="Only run Github Simplify provider")
-    parser.add_argument("--provider", choices=["mock", "github", "google", "searxng", "openclaw", "hermes", "all"], default="mock", help="Provider to use")
-    parser.add_argument("--openclaw-file", type=Path, help="Path to a JSON listing export from OpenClaw or another browser agent")
-    parser.add_argument("--openclaw-stage2", choices=["true", "false"], help="Include OpenClaw import as Stage 2 in hybrid mode")
-    parser.add_argument("--openclaw-max-leads", type=int, help="Maximum Stage 1 leads to hand to OpenClaw scripts")
-    parser.add_argument("--openclaw-search-depth", choices=["light", "normal", "aggressive"], help="OpenClaw Stage 2 search depth hint")
-    parser.add_argument("--hardware-bias", choices=["true", "false"], help="Bias scoring and discovery toward hardware roles")
-    parser.add_argument("--hermes-file", type=Path, help="Path to a JSON listing export from Hermes Agent")
-    parser.add_argument("--hermes-enabled", choices=["true", "false"], help="Include Hermes export in all-provider runs")
-    parser.add_argument("--validate-only", action="store_true", help="Re-validate active DB listings without fetching new ones")
-    parser.add_argument("--validate-links", action="store_true", help="Run HTTP link validation on fetched listings (slow)")
-    parser.add_argument("--dry-run", action="store_true", help="Do not write state to seen.json")
-    parser.add_argument("--reset-seen", action="store_true", help="Clear seen.json before running")
-    parser.add_argument("--json-export", action="store_true", help="Export new listings to json")
-    parser.add_argument("--no-open-html", action="store_true", help="Generate results.html but do not open it")
+    parser.add_argument("--mode", choices=["mock", "live"], default="mock")
+    parser.add_argument("--pipeline", choices=["hybrid", "legacy"])
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_DIR)
+    parser.add_argument("--write-default-config", action="store_true")
+    parser.add_argument("--print-report", action="store_true")
+    parser.add_argument("--include-github-only", action="store_true")
+    parser.add_argument(
+        "--provider",
+        choices=["mock", "github", "google", "searxng", "cowork", "all"],
+        default="mock",
+    )
+    parser.add_argument("--cowork-file", type=Path, help="Path override for the Cowork JSON output")
+    parser.add_argument("--cowork-stage2", choices=["true", "false"], help="Include Cowork as Stage 2 in hybrid mode")
+    parser.add_argument("--cowork-max-listings", type=int, help="Maximum listings to request from Cowork")
+    parser.add_argument("--skip-cowork-run", action="store_true", help="Skip running claude; reload existing export")
+    parser.add_argument("--hardware-bias", choices=["true", "false"])
+    parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--validate-links", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--reset-seen", action="store_true")
+    parser.add_argument("--json-export", action="store_true")
+    parser.add_argument("--no-open-html", action="store_true")
 
     args = parser.parse_args()
 
-    # Paths
     config_file = args.output_dir / "config.json"
     seen_file = args.output_dir / "seen.json"
     results_file = args.output_dir / "results.md"
@@ -201,16 +207,12 @@ def main():
     config = Config.load(config_file)
     if args.pipeline:
         config.pipeline = args.pipeline
-    if args.openclaw_stage2 is not None:
-        config.openclaw_stage2 = str_to_bool(args.openclaw_stage2)
-    if args.openclaw_max_leads is not None:
-        config.openclaw_max_leads = args.openclaw_max_leads
-    if args.openclaw_search_depth:
-        config.openclaw_search_depth = args.openclaw_search_depth
+    if args.cowork_stage2 is not None:
+        config.cowork_stage2 = str_to_bool(args.cowork_stage2)
+    if args.cowork_max_listings is not None:
+        config.cowork_max_listings = args.cowork_max_listings
     if args.hardware_bias is not None:
         config.hardware_bias = str_to_bool(args.hardware_bias)
-    if args.hermes_enabled is not None:
-        config.hermes_enabled = str_to_bool(args.hermes_enabled)
 
     if args.validate_only:
         _run_validate_only(config, args.output_dir, errors_file, args.no_open_html)
@@ -223,17 +225,16 @@ def main():
     else:
         state_manager.load()
 
-    # Determine providers
     provider_choice = args.provider
     pipeline_choice = getattr(config, "pipeline", "hybrid")
-    hermes_file = args.hermes_file
+    cowork_file = args.cowork_file
+    skip_cowork_run = args.skip_cowork_run
 
     if pipeline_choice == "legacy":
-        providers = build_legacy_providers(config, provider_choice, args.mode, args.include_github_only, args.openclaw_file, hermes_file)
+        providers = build_legacy_providers(config, provider_choice, args.mode, args.include_github_only, cowork_file, skip_cowork_run)
     else:
-        providers = build_hybrid_stages(config, provider_choice, args.mode, args.include_github_only, args.openclaw_file, hermes_file)
+        providers = build_hybrid_stages(config, provider_choice, args.mode, args.include_github_only, cowork_file, skip_cowork_run)
 
-    # Fallback to mock if empty
     if not providers:
         providers.append(("stage1", MockProvider(config)))
 
@@ -254,7 +255,7 @@ def main():
         except RateLimitError as e:
             rate_limit_errors.append((provider.__class__.__name__, str(e)))
             logger.error(f"Rate limit error from {provider.__class__.__name__}: {e}")
-            print(f"Rate limit from {provider.__class__.__name__}; continuing with other providers.", file=sys.stderr)
+            print(f"Rate limit from {provider.__class__.__name__}; continuing.", file=sys.stderr)
         except ProviderError as e:
             logger.error(f"Provider error from {provider.__class__.__name__}: {e}")
             print(f"Provider error from {provider.__class__.__name__}: {e}", file=sys.stderr)
@@ -266,13 +267,11 @@ def main():
         print("Rate limit hit and no listings were collected. Retry later.", file=sys.stderr)
         sys.exit(42)
 
-    # Pipeline
     try:
         normalized = normalize_listings(all_raw_listings)
         if pipeline_choice == "hybrid":
             normalized = merge_stage_listings(normalized)
 
-        # Optional HTTP link validation
         if args.validate_links:
             from silicon_list.validator import ListingValidator, ValidationStatus
             validator = ListingValidator()
@@ -289,27 +288,21 @@ def main():
 
         kept, skipped = filter_listings(normalized, config)
 
-        # Intra-batch deduplication
         deduper = Deduper()
         kept = deduper.deduplicate(kept)
 
-        # Cross-run deduplication
         new_listings, seen = dedupe_listings(kept, state_manager)
         new_count = len(new_listings)
 
-        # Scoring/ranking
         use_new_ranker = getattr(config, "use_new_ranker", True)
         if use_new_ranker:
             scored = rank_listings(new_listings, config)
-            # Filter out tier 4 (suppressed)
             suppressed = [s for s in scored if s.tier == 4]
             scored = [s for s in scored if s.tier <= 3]
         else:
             scored = score_listings(new_listings, config)
             suppressed = []
 
-        # SQLite upsert
-        db = None
         if getattr(config, "db_enabled", True):
             try:
                 from silicon_list.storage.database import ListingsDatabase
@@ -325,19 +318,16 @@ def main():
         generate_report(scored, skipped, results_file, config)
         generate_html_report(scored, skipped, html_file, config, new_count=new_count)
 
-        # Write state
         if not args.dry_run:
             for s in scored:
                 for k in generate_dedupe_keys(s.listing):
                     state_manager.add(k)
             state_manager.save()
 
-        # Print report if requested
         if args.print_report:
             with open(results_file, 'r') as f:
                 print(f.read())
 
-        # JSON export
         if args.json_export:
             json_file = args.output_dir / "results.json"
             from dataclasses import asdict
@@ -350,7 +340,6 @@ def main():
             if not opened:
                 print(f"HTML report written to {html_file}", file=sys.stderr)
 
-        # Summary
         tier_counts = {1: 0, 2: 0, 3: 0}
         for s in scored:
             tier_counts[s.tier] = tier_counts.get(s.tier, 0) + 1

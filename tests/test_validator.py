@@ -61,12 +61,28 @@ def test_http_200_with_title_and_apply_is_valid(validator):
     assert result.confidence >= 0.8
 
 
-def test_http_200_with_apply_only_is_valid(validator):
+def test_http_200_with_apply_only_is_uncertain(validator):
     body = "<html><body><p>Some job description.</p><a href='/apply'>Apply now</a></body></html>"
     with patch("requests.get", return_value=_mock_response(200, text=body)):
         result = validator.validate(_listing())
-    assert result.status == ValidationStatus.VALID
-    assert result.confidence >= 0.75
+    assert result.status == ValidationStatus.UNCERTAIN
+    assert result.notes == "apply_found_without_title"
+
+
+def test_http_200_without_job_signals_is_uncertain(validator):
+    body = "<html><body><p>Browse our open roles.</p></body></html>"
+    with patch("requests.get", return_value=_mock_response(200, text=body)):
+        result = validator.validate(_listing())
+    assert result.status == ValidationStatus.UNCERTAIN
+    assert result.notes == "http_200_no_job_signal"
+
+
+def test_http_200_with_title_only_is_uncertain(validator):
+    body = "<html><body><h1>ASIC Design Intern at Acme</h1><p>Role details.</p></body></html>"
+    with patch("requests.get", return_value=_mock_response(200, text=body)):
+        result = validator.validate(_listing())
+    assert result.status == ValidationStatus.UNCERTAIN
+    assert result.notes == "title_found_without_apply"
 
 
 def test_expired_posting_is_invalid(validator):

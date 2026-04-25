@@ -252,14 +252,13 @@ class Config:
     github_search_queries: list[str] = field(default_factory=lambda: DEFAULT_GITHUB_SEARCH_QUERIES)
     github_search_results_per_query: int = 5
     pipeline: str = "hybrid"
-    openclaw_stage2: bool = True
-    openclaw_max_leads: int = 25
-    openclaw_search_depth: str = "normal"
+    cowork_stage2: bool = True
+    cowork_max_listings: int = 100
+    cowork_timeout_seconds: int = 900
     hardware_bias: bool = True
-    openclaw_export_path: str = "~/.silicon-list/openclaw-listings.json"
+    cowork_export_path: str = "~/.silicon-list/openclaw-listings.json"
     require_exact_apply_links: bool = True
-    hermes_enabled: bool = False
-    hermes_export_path: str = "~/.silicon-list/hermes-listings.json"
+    require_us_locations: bool = True
     db_enabled: bool = True
     use_new_ranker: bool = True
 
@@ -275,6 +274,27 @@ class Config:
         with open(path, 'r') as f:
             try:
                 data = json.load(f)
-                return cls(**data)
             except Exception:
                 return cls()
+
+        # Migrate old field names and drop unknown keys so old config.json files
+        # don't crash after the openclaw/hermes → cowork rename.
+        _RENAMES = {
+            "openclaw_stage2": "cowork_stage2",
+            "openclaw_max_leads": "cowork_max_listings",
+            "openclaw_export_path": "cowork_export_path",
+        }
+        _REMOVED = {"openclaw_search_depth", "hermes_enabled", "hermes_export_path"}
+
+        import dataclasses
+        known = {f.name for f in dataclasses.fields(cls)}
+        migrated: dict = {}
+        for k, v in data.items():
+            if k in _REMOVED:
+                continue
+            migrated[_RENAMES.get(k, k)] = v
+
+        try:
+            return cls(**{k: v for k, v in migrated.items() if k in known})
+        except Exception:
+            return cls()

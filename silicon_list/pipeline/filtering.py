@@ -9,6 +9,87 @@ from silicon_list.pipeline.link_validation import (
     validate_listing_link,
 )
 
+_US_STATE_ABBREVS = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+}
+
+_US_STATE_NAMES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming", "district of columbia",
+}
+
+_NON_US_PATTERN = re.compile(
+    r"\b(?:"
+    r"canada|ontario|british columbia|alberta|quebec|manitoba|saskatchewan|"
+    r"nova scotia|new brunswick|"
+    r"united kingdom|u\.k\.|england|scotland|wales|"
+    r"germany|france|ireland|netherlands|sweden|denmark|norway|finland|"
+    r"switzerland|austria|belgium|spain|italy|poland|czech republic|"
+    r"india|china|japan|taiwan|south korea|singapore|"
+    r"australia|new zealand|brazil|mexico|israel|"
+    r"amsterdam|london|toronto|vancouver|munich|berlin|paris|dublin|"
+    r"stockholm|oslo|copenhagen|bangalore|bengaluru|hyderabad|pune|"
+    r"tel aviv|sydney|melbourne"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_us_location(location: str) -> bool:
+    """
+    Returns True when the location is US-based or genuinely unknown.
+    Returns False only when a clearly non-US location is detected.
+    """
+    if not location or not location.strip():
+        return True  # unknown → keep
+
+    loc_lower = location.strip().lower()
+
+    # Plain "Remote" or "Remote (US)" — keep
+    if re.match(r"^remote\b", loc_lower):
+        # Only exclude if a non-US country is also mentioned
+        return not _NON_US_PATTERN.search(location)
+
+    # Explicit non-US indicator → exclude
+    if _NON_US_PATTERN.search(location):
+        return False
+
+    # "USA" / "United States" / "US" → keep
+    if re.search(r"\b(?:usa|united states|u\.s\.a?\.)\b", loc_lower):
+        return True
+
+    # "City, ST" where ST is a US state abbreviation → keep
+    parts = [p.strip() for p in location.split(",")]
+    for part in reversed(parts):
+        token = part.strip().upper().split()[0] if part.strip() else ""
+        if token in _US_STATE_ABBREVS:
+            return True
+        if token in ("USA", "US"):
+            return True
+
+    # Full US state name present → keep
+    if any(state in loc_lower for state in _US_STATE_NAMES):
+        return True
+
+    # Multiple / nationwide / flexible → keep
+    if re.search(r"\b(?:multiple|various|flexible|nationwide)\b", loc_lower):
+        return True
+
+    # Can't determine — keep conservatively
+    return True
+
 ELIGIBILITY_EXCLUSION_PATTERNS = [
     re.compile(r"\bclearance\b", re.IGNORECASE),
     re.compile(r"\bitar\b", re.IGNORECASE),
@@ -51,8 +132,8 @@ def has_hard_exclusion(text: str, config: Config) -> bool:
     return any(pattern.search(text) for pattern in ELIGIBILITY_EXCLUSION_PATTERNS)
 
 def is_generic_openclaw_listing(listing: Listing) -> bool:
-    """Returns true for broad OpenClaw results that are not specific job postings."""
-    if listing.source != "openclaw":
+    """Returns true for broad OpenClaw/Cowork results that are not specific job postings."""
+    if listing.source not in ("openclaw", "cowork"):
         return False
 
     role_lower = listing.role.lower()
@@ -172,7 +253,7 @@ def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listi
             skipped.append((lst, link_validation.reason))
             continue
 
-        if lst.source == "openclaw":
+        if lst.source in ("openclaw", "cowork"):
             is_student_role = (
                 "intern" in role_lower
                 or "co-op" in role_lower
@@ -191,6 +272,11 @@ def filter_listings(listings: List[Listing], config: Config) -> Tuple[List[Listi
             if not is_student_role and not is_student_desc:
                 skipped.append((lst, "not_student_role"))
                 continue
+
+        # US-only filter
+        if getattr(config, "require_us_locations", True) and not is_us_location(lst.location):
+            skipped.append((lst, "non_us_location"))
+            continue
             
         # 2. Check if it's an internship or co-op
         # The role OR description should mention intern, internship, or co-op/coop.

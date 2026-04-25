@@ -108,10 +108,7 @@ class GitHubSimplifyProvider(BaseProvider):
         # We find the hardware section, and parse lines until the next header or end of file
         
         # Use regex to find the actual heading line for the hardware section.
-        hw_match = re.search(
-            r'(?im)^#+\s*(?:[^\w#\n]+\s*)?Hardware(?: Engineering)?(?: Internship Roles)?\s*$',
-            text
-        )
+        hw_match = re.search(r'(?im)^#+\s*.*\bhardware\b.*$', text)
         
         if not hw_match:
             logger.warning("Could not find 'Hardware Engineering' section in GitHub markdown.")
@@ -125,7 +122,7 @@ class GitHubSimplifyProvider(BaseProvider):
         if next_heading_match:
             section_text = section_text[:next_heading_match.start()]
             
-        if "<table>" in section_text:
+        if re.search(r"<table\b", section_text, re.IGNORECASE):
             return self._parse_html_table(section_text, source_url)
 
         # Parse table rows. A typical row looks like:
@@ -221,7 +218,9 @@ class GitHubSimplifyProvider(BaseProvider):
                 )
                 listings.append(listing)
                 
-        return listings
+        if listings:
+            return listings
+        return self._parse_hardware_lines(section_text, source_url)
 
     def _parse_html_table(self, section_text: str, source_url: str = URL) -> List[Listing]:
         parser = _TableParser()

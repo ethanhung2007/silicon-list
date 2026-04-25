@@ -35,6 +35,8 @@ GENERIC_URL_PATTERNS = [
     re.compile(r"jobs\.lever\.co/[^/?#]+/?(?:$|[?#])", re.IGNORECASE),
     re.compile(r"(?:boards|job-boards)\.greenhouse\.io/[^/?#]+/?(?:$|[?#])", re.IGNORECASE),
     re.compile(r"jobs\.ashbyhq\.com/[^/?#]+/?(?:$|[?#])", re.IGNORECASE),
+    re.compile(r"/about/job-post(?:$|[?#])", re.IGNORECASE),
+    re.compile(r"/career-details/?(?:$|[?#])", re.IGNORECASE),
 ]
 
 GENERIC_HOSTS = {
@@ -60,6 +62,7 @@ VALIDATION_FAILURE_VALUES = {
     "not_found",
     "redirect_loop",
     "blocked",
+    "uncertain",
 }
 
 

@@ -137,12 +137,18 @@ class ListingValidator:
 
             if has_title and has_apply:
                 confidence, notes = 0.9, "title_and_apply_found"
-            elif has_apply:
-                confidence, notes = 0.8, "apply_found"
             elif has_title:
-                confidence, notes = 0.75, "title_found"
+                return ValidationResult(
+                    ValidationStatus.UNCERTAIN, 0.5, final_url, "title_found_without_apply"
+                )
+            elif has_apply:
+                return ValidationResult(
+                    ValidationStatus.UNCERTAIN, 0.5, final_url, "apply_found_without_title"
+                )
             else:
-                confidence, notes = 0.6, "http_200_heuristic"
+                return ValidationResult(
+                    ValidationStatus.UNCERTAIN, 0.4, final_url, "http_200_no_job_signal"
+                )
 
             return ValidationResult(ValidationStatus.VALID, confidence, final_url, notes)
 

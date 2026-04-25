@@ -85,6 +85,42 @@ def test_filter_discards_imperfect_apply_urls_before_reporting(config):
     assert kept[1].company == "B"
     assert skipped[0][1] == "generic_or_search_url"
 
+
+def test_filter_discards_known_generic_company_job_pages(config):
+    listings = [
+        Listing(source="test", source_job_id="1", company="Trackonomy", role="Embedded Firmware Engineer Intern", location="US", apply_url="https://trackonomysystems.com/career-details/", description="Firmware internship.", cycle=""),
+        Listing(source="test", source_job_id="2", company="Agility Robotics", role="Firmware Engineer Intern", location="US", apply_url="https://www.agilityrobotics.com/about/job-post", description="Embedded firmware internship.", cycle=""),
+        Listing(source="test", source_job_id="3", company="B", role="FPGA Intern", location="US", apply_url="https://jobs.lever.co/example/123", description="Verilog internship.", cycle=""),
+    ]
+
+    kept, skipped = filter_listings(listings, config)
+
+    assert len(kept) == 1
+    assert kept[0].company == "B"
+    assert [reason for _, reason in skipped] == ["generic_or_search_url", "generic_or_search_url"]
+
+
+def test_filter_discards_uncertain_link_validation_metadata(config):
+    listings = [
+        Listing(
+            source="test",
+            source_job_id="1",
+            company="A",
+            role="FPGA Intern",
+            location="US",
+            apply_url="https://jobs.lever.co/example/123",
+            description="Verilog internship.",
+            raw_metadata={"validation_status": "uncertain"},
+        ),
+        Listing(source="test", source_job_id="2", company="B", role="FPGA Intern", location="US", apply_url="https://jobs.lever.co/example/456", description="Verilog internship.", raw_metadata={"validation_status": "valid"}),
+    ]
+
+    kept, skipped = filter_listings(listings, config)
+
+    assert len(kept) == 1
+    assert kept[0].company == "B"
+    assert skipped[0][1] == "metadata_uncertain"
+
 def test_filter_old_posted_dates(config):
     config.max_listing_age_days = 31
     listings = [
@@ -125,9 +161,13 @@ def test_filter_openclaw_discards_generic_links_before_reporting(config):
 
     kept, skipped = filter_listings(listings, config)
 
-    assert len(kept) == 2
-    assert {listing.company for listing in kept} == {"Optiver", "Motorola Solutions"}
-    assert [reason for _, reason in skipped] == ["generic_job_collection", "not_exact_posting_url"]
+    # Optiver is Amsterdam, NL → filtered by US location requirement
+    assert len(kept) == 1
+    assert kept[0].company == "Motorola Solutions"
+    skip_reasons = [reason for _, reason in skipped]
+    assert "generic_job_collection" in skip_reasons
+    assert "not_exact_posting_url" in skip_reasons
+    assert "non_us_location" in skip_reasons
 
 def test_filter_openclaw_allows_new_grad_roles(config):
     listings = [

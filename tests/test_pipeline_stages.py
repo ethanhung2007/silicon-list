@@ -11,19 +11,19 @@ def stage_names(stage_providers):
 
 
 def test_hybrid_live_default_all_splits_stage1_and_stage2():
-    config = Config(openclaw_stage2=True)
+    config = Config(cowork_stage2=True)
 
     stages = build_hybrid_stages(config, "mock", "live", False, None)
 
     assert provider_names(stages) == [
         "GitHubSimplifyProvider",
-        "OpenClawFileProvider",
+        "CoworkProvider",
     ]
     assert stage_names(stages) == ["stage1", "stage2"]
 
 
-def test_hybrid_can_disable_openclaw_stage2_for_stage1_lead_pass():
-    config = Config(openclaw_stage2=False)
+def test_hybrid_can_disable_cowork_stage2_for_stage1_lead_pass():
+    config = Config(cowork_stage2=False)
 
     stages = build_hybrid_stages(config, "all", "live", False, None)
 
@@ -41,7 +41,7 @@ def test_hybrid_all_includes_google_when_configured(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "key")
     monkeypatch.setenv("GOOGLE_CSE_ID", "cse")
 
-    stages = build_hybrid_stages(Config(openclaw_stage2=False), "all", "live", False, None)
+    stages = build_hybrid_stages(Config(cowork_stage2=False), "all", "live", False, None)
 
     assert provider_names(stages) == [
         "GitHubSimplifyProvider",

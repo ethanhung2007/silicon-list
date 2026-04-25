@@ -99,6 +99,29 @@ def test_parse_html_table(provider):
     assert listings[1].role == "R&D Engineering Co-op"
     assert listings[1].apply_url == "https://baxter.com/apply"
 
+def test_parse_html_table_with_heading_and_table_variants(provider):
+    markdown = """
+# Some README
+### 🛠️ Hardware Engineering Internships
+
+<table data-testid="job-table">
+<tr>
+<td><strong>Qualcomm</strong></td>
+<td>ASIC Verification Intern</td>
+<td>San Diego, CA</td>
+<td><a href="https://qualcomm.com/apply/123">Apply</a></td>
+<td>2d</td>
+</tr>
+</table>
+    """
+
+    listings = provider._parse_markdown(markdown)
+
+    assert len(listings) == 1
+    assert listings[0].company == "Qualcomm"
+    assert listings[0].role == "ASIC Verification Intern"
+    assert listings[0].apply_url == "https://qualcomm.com/apply/123"
+
 def test_parse_hardware_lines_when_no_hardware_section(provider):
     markdown = """
 # Hardware-ish jobs
